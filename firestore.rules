@@ -1,0 +1,74 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Connection validation test path
+    match /test/{docId} {
+      allow read, write: if true;
+    }
+
+    // School Settings & Configurations
+    match /school_settings/{settingId} {
+      allow read, write: if true;
+    }
+
+    // Academic Years
+    match /academic_years/{yearId} {
+      allow read, write: if true;
+    }
+
+    // SPMB Registrations
+    match /registrations/{registrationId} {
+      allow read, write: if true;
+    }
+
+    // Students
+    match /students/{studentId} {
+      allow read, write: if true;
+    }
+
+    // Parents
+    match /parents/{parentId} {
+      allow read, write: if true;
+    }
+
+    // Student Development
+    match /student_development/{devId} {
+      allow read, write: if true;
+    }
+
+    // Document Checklists
+    match /document_checklists/{checklistId} {
+      allow read, write: if true;
+    }
+
+    // Rombongan Belajar (Rombels)
+    match /rombels/{rombelId} {
+      allow read, write: if true;
+    }
+
+    // New Students Database (TU)
+    match /new_students/{newStudentId} {
+      allow read, write: if true;
+    }
+
+    // Activity & Audit Logs
+    match /activity_logs/{logId} {
+      allow read, write: if true;
+    }
+
+    // Users & Admins
+    match /users/{userId} {
+      allow read, write: if true;
+    }
+
+    match /admins/{adminId} {
+      allow read, write: if true;
+    }
+  }
+}

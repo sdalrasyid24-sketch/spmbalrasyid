@@ -1,0 +1,6 @@
+{
+  "name": "SPMB Al-Rasyid",
+  "description": "Sistem Penerimaan Murid Baru SD Al-Rasyid",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

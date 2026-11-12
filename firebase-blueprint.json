@@ -1,0 +1,218 @@
+{
+  "entities": {
+    "Registration": {
+      "title": "Registration",
+      "description": "Data pendaftaran calon peserta didik baru SPMB SD AL-RASYID",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "registrationNumber": { "type": "string" },
+        "academicYear": { "type": "string" },
+        "studentId": { "type": "string" },
+        "inputStatus": { "type": "string", "enum": ["DRAFT", "SELESAI"] },
+        "documentStatus": { "type": "string", "enum": ["BELUM_LENGKAP", "LENGKAP"] },
+        "verificationStatus": { "type": "string", "enum": ["BELUM_DIVERIFIKASI", "TERVERIFIKASI", "PERLU_PERBAIKAN"] },
+        "selectionStatus": { "type": "string", "enum": ["MENUNGGU_KEPUTUSAN", "DITERIMA", "TIDAK_DITERIMA", "CADANGAN"] },
+        "transferStatus": { "type": "string", "enum": ["BELUM_DITRANSFER", "BERHASIL", "GAGAL"] },
+        "operatorName": { "type": "string" },
+        "operatorId": { "type": "string" },
+        "inputDate": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["registrationNumber", "academicYear", "studentId", "inputStatus", "documentStatus", "verificationStatus", "selectionStatus", "transferStatus"]
+    },
+    "Student": {
+      "title": "Student",
+      "description": "Identitas diri dan data fisik calon peserta didik baru",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "fullName": { "type": "string" },
+        "nickName": { "type": "string" },
+        "gender": { "type": "string", "enum": ["L", "P"] },
+        "birthPlace": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "religion": { "type": "string" },
+        "citizenship": { "type": "string" },
+        "childOrder": { "type": "number" },
+        "siblingCount": { "type": "number" },
+        "biologicalSiblings": { "type": "number" },
+        "familyStatus": { "type": "string" },
+        "dailyLanguage": { "type": "string" },
+        "livingWith": { "type": "string" },
+        "weightKg": { "type": "string" },
+        "heightCm": { "type": "string" },
+        "bloodType": { "type": "string" },
+        "chronicIllness": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "distanceToSchoolKm": { "type": "string" },
+        "previousSchoolName": { "type": "string" },
+        "previousSchoolAddress": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["fullName", "gender", "birthPlace", "birthDate", "address", "phone"]
+    },
+    "Parent": {
+      "title": "Parent",
+      "description": "Data orang tua atau wali calon peserta didik",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "fatherName": { "type": "string" },
+        "fatherEducation": { "type": "string" },
+        "fatherJob": { "type": "string" },
+        "fatherIncome": { "type": "string" },
+        "motherName": { "type": "string" },
+        "motherEducation": { "type": "string" },
+        "motherJob": { "type": "string" },
+        "motherIncome": { "type": "string" },
+        "parentAddress": { "type": "string" }
+      },
+      "required": ["studentId"]
+    },
+    "StudentDevelopment": {
+      "title": "StudentDevelopment",
+      "description": "Perkembangan kemampuan membaca, Al-Quran, dan harapan orang tua",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "latinReadingAbility": { "type": "string" },
+        "quranReadingAbility": { "type": "string" },
+        "shuttleServiceNeeded": { "type": "boolean" },
+        "specialConditions": { "type": "string" },
+        "achievements": { "type": "string" },
+        "parentSuggestions": { "type": "string" },
+        "parentExpectations": { "type": "string" }
+      },
+      "required": ["studentId"]
+    },
+    "DocumentChecklist": {
+      "title": "DocumentChecklist",
+      "description": "Checklist pemeriksaan fisik 4 dokumen persyaratan",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "registrationId": { "type": "string" },
+        "completedCount": { "type": "number" },
+        "totalCount": { "type": "number" },
+        "isComplete": { "type": "boolean" },
+        "lastCheckedBy": { "type": "string" },
+        "lastCheckedAt": { "type": "string", "format": "date-time" },
+        "items": { "type": "array" }
+      },
+      "required": ["registrationId", "completedCount", "totalCount", "isComplete"]
+    },
+    "NewStudent": {
+      "title": "NewStudent",
+      "description": "Data siswa baru modul Tata Usaha setelah ditransfer",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "registrationId": { "type": "string" },
+        "studentId": { "type": "string" },
+        "nis": { "type": "string" },
+        "nisn": { "type": "string" },
+        "className": { "type": "string" },
+        "rombel": { "type": "string" },
+        "entryYear": { "type": "string" },
+        "studentStatus": { "type": "string" },
+        "adminStatus": { "type": "string", "enum": ["BELUM_LENGKAP", "LENGKAP"] },
+        "admittedAt": { "type": "string" },
+        "transferredAt": { "type": "string", "format": "date-time" },
+        "tuNotes": { "type": "string" },
+        "updatedBy": { "type": "string" }
+      },
+      "required": ["registrationId", "studentId", "entryYear", "adminStatus"]
+    },
+    "SchoolSetting": {
+      "title": "SchoolSetting",
+      "description": "Pengaturan identitas sekolah SD AL-RASYID",
+      "type": "object",
+      "properties": {
+        "schoolName": { "type": "string" },
+        "npsn": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "website": { "type": "string" },
+        "headmasterName": { "type": "string" },
+        "headmasterNip": { "type": "string" },
+        "activeAcademicYear": { "type": "string" },
+        "registrationNumberPattern": { "type": "string" },
+        "classesAvailable": { "type": "string" }
+      }
+    },
+    "AcademicYear": {
+      "title": "AcademicYear",
+      "description": "Data tahun pelajaran SPMB",
+      "type": "object",
+      "properties": {
+        "code": { "type": "string" },
+        "name": { "type": "string" },
+        "isActive": { "type": "boolean" },
+        "numberPrefix": { "type": "string" }
+      },
+      "required": ["code", "name"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Jejak audit aktivitas petugas",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "action": { "type": "string" },
+        "module": { "type": "string" },
+        "description": { "type": "string" },
+        "details": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userName", "userRole", "action", "module", "description"]
+    }
+  },
+  "firestore": {
+    "/registrations/{registrationId}": {
+      "schema": { "$ref": "#/entities/Registration" },
+      "description": "Koleksi pendaftaran calon siswa baru SPMB"
+    },
+    "/students/{studentId}": {
+      "schema": { "$ref": "#/entities/Student" },
+      "description": "Koleksi identitas dan fisik calon peserta didik"
+    },
+    "/parents/{parentId}": {
+      "schema": { "$ref": "#/entities/Parent" },
+      "description": "Koleksi data orang tua dan wali"
+    },
+    "/student_development/{devId}": {
+      "schema": { "$ref": "#/entities/StudentDevelopment" },
+      "description": "Koleksi perkembangan dan kesiapan belajar"
+    },
+    "/document_checklists/{checklistId}": {
+      "schema": { "$ref": "#/entities/DocumentChecklist" },
+      "description": "Koleksi checklist fisik 4 dokumen"
+    },
+    "/new_students/{newStudentId}": {
+      "schema": { "$ref": "#/entities/NewStudent" },
+      "description": "Koleksi siswa baru modul Tata Usaha"
+    },
+    "/school_settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SchoolSetting" },
+      "description": "Pengaturan identitas sekolah"
+    },
+    "/academic_years/{yearId}": {
+      "schema": { "$ref": "#/entities/AcademicYear" },
+      "description": "Koleksi tahun pelajaran"
+    },
+    "/activity_logs/{logId}": {
+      "schema": { "$ref": "#/entities/ActivityLog" },
+      "description": "Log aktivitas dan audit"
+    }
+  }
+}
