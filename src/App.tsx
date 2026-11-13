@@ -4,7 +4,7 @@ import {
   Plus, Search, CheckCircle, XCircle, AlertCircle, Save, UserPlus, 
   BookOpen, ChevronRight, FileArchive, ChevronLeft, Download, Check, 
   ChevronDown, Layers, FileCheck, Clock, ArrowRight, Activity, Trash2, Edit, CalendarDays,
-  Lock, User, Eye, EyeOff, LogOut, ShieldCheck, Sparkles, Database, RefreshCw
+  Lock, User, Eye, EyeOff, LogOut, ShieldCheck, Sparkles
 } from 'lucide-react';
 import { firestoreService, initialDefaultSettings } from './services/firestoreService.ts';
 
@@ -148,7 +148,7 @@ const exportToExcel = (title: string, columns: string[], data: any[][], filename
 };
 
 // --- LOGIN COMPONENT ---
-function LoginView({ onLoginSuccess }: { onLoginSuccess: () => void }) {
+function LoginView({ onLoginSuccess, sessionMessage }: { onLoginSuccess: () => void; sessionMessage?: string | null }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -195,6 +195,12 @@ function LoginView({ onLoginSuccess }: { onLoginSuccess: () => void }) {
         {/* Sisi Kanan: Kartu Putih Form Login */}
         <div className="md:col-span-5 relative z-10">
           <Card className="p-6 sm:p-8 border-slate-200 shadow-xl rounded-2xl bg-white">
+            {sessionMessage && !error && (
+              <div className="mb-5 p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex items-start space-x-2.5 text-amber-800 text-sm animate-in fade-in duration-200">
+                <Clock size={18} className="flex-shrink-0 mt-0.5 text-amber-600" />
+                <span className="font-medium leading-snug">{sessionMessage}</span>
+              </div>
+            )}
             {error && (
               <div className="mb-5 p-3.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center space-x-2.5 text-rose-600 text-sm animate-in fade-in duration-200">
                 <AlertCircle size={18} className="flex-shrink-0" />
@@ -257,29 +263,149 @@ function LoginView({ onLoginSuccess }: { onLoginSuccess: () => void }) {
   );
 }
 
+// --- SESSION & INACTIVITY CONSTANTS ---
+const AUTH_KEY = 'spmb_alrasyid_auth';
+const LAST_ACTIVITY_KEY = 'spmb_alrasyid_last_activity';
+const INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000; // 1 jam (60 menit)
+const WARNING_BEFORE_LOGOUT_MS = 60 * 1000; // Peringatan 60 detik sebelum logout otomatis
+
 // --- MAIN APPLICATION ---
 export default function App() {
+  const [sessionMessage, setSessionMessage] = useState<string | null>(() => {
+    const isAuth = localStorage.getItem(AUTH_KEY) === 'true';
+    const lastAct = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0);
+    if (isAuth && lastAct > 0 && Date.now() - lastAct >= INACTIVITY_TIMEOUT_MS) {
+      localStorage.removeItem(AUTH_KEY);
+      localStorage.removeItem(LAST_ACTIVITY_KEY);
+      return 'Sesi Anda telah berakhir otomatis karena tidak ada aktivitas selama 1 jam. Silakan login kembali.';
+    }
+    return null;
+  });
+
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    return localStorage.getItem('spmb_alrasyid_auth') === 'true';
+    return localStorage.getItem(AUTH_KEY) === 'true';
   });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [idleWarningSeconds, setIdleWarningSeconds] = useState<number | null>(null);
+  const lastActivityRef = useRef<number>(
+    Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0) || Date.now()
+  );
 
   const handleLoginSuccess = () => {
-    localStorage.setItem('spmb_alrasyid_auth', 'true');
+    const now = Date.now();
+    lastActivityRef.current = now;
+    localStorage.setItem(AUTH_KEY, 'true');
+    localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+    setSessionMessage(null);
+    setIdleWarningSeconds(null);
     setIsAuthenticated(true);
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('spmb_alrasyid_auth');
+  const handleLogout = (isAutoTimeout = false) => {
+    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(LAST_ACTIVITY_KEY);
+    setIdleWarningSeconds(null);
     setIsAuthenticated(false);
+    if (isAutoTimeout) {
+      setSessionMessage('Sesi Anda telah berakhir otomatis karena tidak ada aktivitas selama 1 jam. Silakan login kembali.');
+    } else {
+      setSessionMessage(null);
+    }
   };
+
+  // Auto-logout saat tidak ada aktivitas selama 1 jam
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const storedLast = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0);
+    if (storedLast > 0) {
+      lastActivityRef.current = storedLast;
+    } else {
+      const now = Date.now();
+      lastActivityRef.current = now;
+      localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+    }
+
+    let lastSavedAt = 0;
+
+    const resetActivity = (force = false) => {
+      const now = Date.now();
+      lastActivityRef.current = now;
+      setIdleWarningSeconds((prev) => (prev !== null ? null : prev));
+      if (force || now - lastSavedAt >= 10000) {
+        lastSavedAt = now;
+        localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+      }
+    };
+
+    const handleUserActivity = () => {
+      // Saat modal peringatan muncul, user harus menekan tombol "Tetap Masuk" agar tidak tertutup tidak sengaja
+      if (Date.now() - lastActivityRef.current >= INACTIVITY_TIMEOUT_MS - WARNING_BEFORE_LOGOUT_MS) {
+        return;
+      }
+      resetActivity(false);
+    };
+
+    const checkInactivity = () => {
+      const latestStored = Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0);
+      const effectiveLast = Math.max(lastActivityRef.current, latestStored);
+      const elapsed = Date.now() - effectiveLast;
+
+      if (elapsed >= INACTIVITY_TIMEOUT_MS) {
+        handleLogout(true);
+        return;
+      }
+
+      if (elapsed >= INACTIVITY_TIMEOUT_MS - WARNING_BEFORE_LOGOUT_MS) {
+        const remaining = Math.max(1, Math.ceil((INACTIVITY_TIMEOUT_MS - elapsed) / 1000));
+        setIdleWarningSeconds(remaining);
+      } else {
+        setIdleWarningSeconds((prev) => (prev !== null ? null : prev));
+      }
+    };
+
+    const handleStorageSync = (e: StorageEvent) => {
+      if (e.key === AUTH_KEY && e.newValue !== 'true') {
+        setIsAuthenticated(false);
+        setIdleWarningSeconds(null);
+      } else if (e.key === LAST_ACTIVITY_KEY && e.newValue) {
+        const val = Number(e.newValue);
+        if (!isNaN(val) && val > lastActivityRef.current) {
+          lastActivityRef.current = val;
+          setIdleWarningSeconds(null);
+        }
+      }
+    };
+
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible') {
+        checkInactivity();
+      }
+    };
+
+    const events: (keyof WindowEventMap)[] = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart', 'click'];
+    events.forEach((ev) => window.addEventListener(ev, handleUserActivity, { passive: true }));
+    window.addEventListener('storage', handleStorageSync);
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
+
+    checkInactivity();
+    const intervalId = window.setInterval(checkInactivity, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+      events.forEach((ev) => window.removeEventListener(ev, handleUserActivity));
+      window.removeEventListener('storage', handleStorageSync);
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
+    };
+  }, [isAuthenticated]);
   
   // Data State for Application - Synchronized with Firebase Firestore
   const [pendaftar, setPendaftar] = useState<any[]>([]);
   const [rombels, setRombels] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(initialDefaultSettings);
-  const [isFirebaseLive, setIsFirebaseLive] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
@@ -304,7 +430,6 @@ export default function App() {
         );
         pendaftarRef.current = filtered;
         setPendaftar(filtered);
-        setIsFirebaseLive(true);
         setSyncError(null);
       },
       (error) => {
@@ -493,7 +618,7 @@ export default function App() {
   ];
 
   if (!isAuthenticated) {
-    return <LoginView onLoginSuccess={handleLoginSuccess} />;
+    return <LoginView onLoginSuccess={handleLoginSuccess} sessionMessage={sessionMessage} />;
   }
 
   return (
@@ -537,24 +662,13 @@ export default function App() {
             </h1>
           </div>
           <div className="flex items-center space-x-3">
-            {/* Firebase Live Database Badge */}
-            <div className="hidden md:flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs">
-              <Database size={13} className="text-emerald-600" />
-              <span>Firebase Firestore</span>
-              {isSyncing ? (
-                <RefreshCw size={12} className="animate-spin text-emerald-600 ml-0.5" />
-              ) : (
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              )}
-            </div>
-
             <div className="h-8 w-8 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 font-bold shadow-sm">A</div>
             <span className="text-sm font-medium text-slate-600 hidden sm:block">Admin</span>
             <Button
-              variant="outline"
+              variant="danger"
               size="sm"
-              onClick={handleLogout}
-              className="ml-2 text-rose-600 border-rose-200 hover:bg-rose-50"
+              onClick={() => handleLogout(false)}
+              className="ml-2 bg-red-600 hover:bg-red-700 text-white focus:ring-red-500"
               title="Keluar"
             >
               <LogOut size={16} className="sm:mr-1.5" />
@@ -575,13 +689,48 @@ export default function App() {
               </button>
             </div>
           )}
-          {activeTab === 'dashboard' && <DashboardView data={pendaftar} rombels={rombels} setActiveTab={setActiveTab} settings={settings} isSyncing={isSyncing} />}
+          {activeTab === 'dashboard' && <DashboardView data={pendaftar} rombels={rombels} setActiveTab={setActiveTab} settings={settings} />}
           {activeTab === 'pendaftar' && <PendaftarView data={pendaftar} setData={handleSetPendaftar} onDelete={handleDeletePendaftar} />}
           {activeTab === 'seleksi' && <SeleksiView data={pendaftar} setData={handleSetPendaftar} settings={settings} setSettings={handleSetSettings} />}
           {activeTab === 'siswabaru' && <SiswaDiterimaView data={pendaftar} settings={settings} setSettings={handleSetSettings} />}
           {activeTab === 'rombel' && <RombelView data={pendaftar} rombels={rombels} setRombels={handleSetRombels} />}
         </div>
       </main>
+
+      {/* Modal Peringatan Auto-Logout Inaktivitas 1 Jam */}
+      {idleWarningSeconds !== null && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-200 animate-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center mb-4 text-amber-600">
+              <Clock size={24} />
+            </div>
+            <h3 className="text-xl font-bold text-slate-800 mb-2">Sesi Akan Berakhir Otomatis</h3>
+            <p className="text-slate-600 mb-6 text-sm leading-relaxed">
+              Tidak ada aktivitas terdeteksi selama hampir 1 jam. Demi keamanan data, sistem akan keluar secara otomatis dalam{' '}
+              <strong className="text-rose-600">{idleWarningSeconds} detik</strong>.
+            </p>
+            <div className="flex justify-end space-x-3">
+              <Button
+                variant="danger"
+                className="bg-red-600 hover:bg-red-700 text-white focus:ring-red-500"
+                onClick={() => handleLogout(false)}
+              >
+                Keluar Sekarang
+              </Button>
+              <Button
+                onClick={() => {
+                  const now = Date.now();
+                  lastActivityRef.current = now;
+                  localStorage.setItem(LAST_ACTIVITY_KEY, String(now));
+                  setIdleWarningSeconds(null);
+                }}
+              >
+                Tetap Masuk
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -621,30 +770,6 @@ function DashboardView({ data, rombels, setActiveTab, settings }: any) {
           </div>
         </div>
       )}
-
-      {/* Database Firebase Live Info Banner */}
-      <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-blue-700 text-white rounded-2xl p-4 sm:p-5 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center space-x-3.5">
-          <div className="w-10 h-10 rounded-xl bg-white/15 flex items-center justify-center flex-shrink-0 backdrop-blur-xs">
-            <Database size={20} className="text-emerald-200" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <h2 className="font-bold text-base text-white">Database Firebase Firestore Terhubung</h2>
-              <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-400/20 text-emerald-200 border border-emerald-300/30">
-                Spark Gratis • Real-Time
-              </span>
-            </div>
-            <p className="text-xs text-emerald-100/90 mt-0.5">
-              Seluruh data pendaftar, checklist dokumen, hasil seleksi, dan rombel otomatis tersimpan secara permanen di cloud Firebase.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center space-x-2 text-xs font-medium text-emerald-100 self-end sm:self-center">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-300 animate-ping"></span>
-          <span>Sinkronisasi Otomatis Aktif</span>
-        </div>
-      </div>
 
       {/* Baris 1: Kartu Metrik Utama */}
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-6">
