@@ -6,7 +6,7 @@ import {
   ChevronDown, Layers, FileCheck, Clock, ArrowRight, Activity, Trash2, Edit, CalendarDays,
   Lock, User, Eye, EyeOff, LogOut, ShieldCheck, Sparkles, Database, RefreshCw
 } from 'lucide-react';
-import { firestoreService, initialDefaultPendaftar, initialDefaultSettings } from './services/firestoreService.ts';
+import { firestoreService, initialDefaultSettings } from './services/firestoreService.ts';
 
 // --- UI COMPONENTS ---
 const Card = ({ children, className = "" }: any) => (
@@ -276,21 +276,40 @@ export default function App() {
   };
   
   // Data State for Application - Synchronized with Firebase Firestore
-  const [pendaftar, setPendaftar] = useState<any[]>(initialDefaultPendaftar);
+  const [pendaftar, setPendaftar] = useState<any[]>([]);
   const [rombels, setRombels] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(initialDefaultSettings);
   const [isFirebaseLive, setIsFirebaseLive] = useState<boolean>(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  const pendaftarRef = useRef<any[]>([]);
+  const rombelsRef = useRef<any[]>([]);
+  const pendingDeleteDocIdsRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    pendaftarRef.current = pendaftar;
+  }, [pendaftar]);
+
+  useEffect(() => {
+    rombelsRef.current = rombels;
+  }, [rombels]);
 
   useEffect(() => {
     // 1. Subscribe to Registrations in Firestore
     const unsubRegistrations = firestoreService.subscribeRegistrations(
       (items) => {
-        setPendaftar(items);
+        const filtered = items.filter(
+          (item: any) => !pendingDeleteDocIdsRef.current.has(String(item._docId ?? item.id))
+        );
+        pendaftarRef.current = filtered;
+        setPendaftar(filtered);
         setIsFirebaseLive(true);
+        setSyncError(null);
       },
       (error) => {
         console.warn('Real-time connection listener note:', error);
+        setSyncError('Gagal menyinkronkan data dengan Firebase Firestore.');
       }
     );
 
@@ -303,6 +322,7 @@ export default function App() {
 
     // 3. Subscribe to Rombels in Firestore
     const unsubRombels = firestoreService.subscribeRombels((savedRombels) => {
+      rombelsRef.current = savedRombels;
       setRombels(savedRombels);
     });
 
@@ -316,21 +336,51 @@ export default function App() {
   // Persistent handler for registrations (CRUD)
   const handleSetPendaftar = async (newValOrFn: any) => {
     setIsSyncing(true);
-    const updated = typeof newValOrFn === 'function' ? newValOrFn(pendaftar) : newValOrFn;
+    setSyncError(null);
+    const prevList = pendaftarRef.current;
+    const updated = typeof newValOrFn === 'function' ? newValOrFn(prevList) : newValOrFn;
+    pendaftarRef.current = updated;
     setPendaftar(updated);
 
     try {
       if (Array.isArray(updated)) {
         // Detect deletions
         const updatedIds = new Set(updated.map((item: any) => String(item.id)));
-        for (const oldItem of pendaftar) {
-          if (!updatedIds.has(String(oldItem.id))) {
-            await firestoreService.deleteRegistration(oldItem.id);
+        const deletedItems = prevList.filter((oldItem: any) => !updatedIds.has(String(oldItem.id)));
+
+        for (const oldItem of deletedItems) {
+          const docId = String(oldItem._docId ?? oldItem.id);
+          pendingDeleteDocIdsRef.current.add(docId);
+          try {
+            await firestoreService.deleteRegistration(docId);
+          } finally {
+            pendingDeleteDocIdsRef.current.delete(docId);
           }
         }
+
+        // Remove deleted student IDs from any rombel
+        if (deletedItems.length > 0) {
+          const deletedIdStrings = new Set(deletedItems.map((d: any) => String(d.id)));
+          const currentRombels = rombelsRef.current;
+          const updatedRombels = currentRombels.map((r: any) => ({
+            ...r,
+            students: (r.students || []).filter((sid: any) => !deletedIdStrings.has(String(sid)))
+          }));
+          const hasRombelChanges = updatedRombels.some(
+            (r: any, idx: number) => (r.students?.length || 0) !== (currentRombels[idx]?.students?.length || 0)
+          );
+          if (hasRombelChanges) {
+            rombelsRef.current = updatedRombels;
+            setRombels(updatedRombels);
+            for (const r of updatedRombels) {
+              await firestoreService.saveRombel(r);
+            }
+          }
+        }
+
         // Detect additions or modifications
         for (const item of updated) {
-          const prev = pendaftar.find((p: any) => String(p.id) === String(item.id));
+          const prev = prevList.find((p: any) => String(p.id) === String(item.id));
           if (!prev || JSON.stringify(prev) !== JSON.stringify(item)) {
             await firestoreService.saveRegistration(item);
           }
@@ -338,7 +388,51 @@ export default function App() {
       }
     } catch (e) {
       console.error('Error syncing registration to Firebase:', e);
+      setSyncError('Terjadi kesalahan saat menyimpan atau menghapus data di Firebase Firestore.');
     } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Explicit permanent delete handler for a single registration
+  const handleDeletePendaftar = async (targetReg: any) => {
+    setIsSyncing(true);
+    setSyncError(null);
+    const targetId = targetReg?.id ?? targetReg;
+    const docId = String(targetReg?._docId ?? targetId);
+
+    pendingDeleteDocIdsRef.current.add(docId);
+    const updated = pendaftarRef.current.filter(
+      (item: any) => String(item._docId ?? item.id) !== docId && String(item.id) !== String(targetId)
+    );
+    pendaftarRef.current = updated;
+    setPendaftar(updated);
+
+    try {
+      await firestoreService.deleteRegistration(docId);
+
+      // Remove deleted student from any rombel
+      const currentRombels = rombelsRef.current;
+      const updatedRombels = currentRombels.map((r: any) => ({
+        ...r,
+        students: (r.students || []).filter((sid: any) => String(sid) !== String(targetId))
+      }));
+      const hasRombelChanges = updatedRombels.some(
+        (r: any, idx: number) => (r.students?.length || 0) !== (currentRombels[idx]?.students?.length || 0)
+      );
+      if (hasRombelChanges) {
+        rombelsRef.current = updatedRombels;
+        setRombels(updatedRombels);
+        for (const r of updatedRombels) {
+          await firestoreService.saveRombel(r);
+        }
+      }
+    } catch (e) {
+      console.error('Error deleting registration from Firebase:', e);
+      setSyncError('Gagal menghapus data pendaftar secara permanen dari Firebase Firestore.');
+      throw e;
+    } finally {
+      pendingDeleteDocIdsRef.current.delete(docId);
       setIsSyncing(false);
     }
   };
@@ -346,12 +440,14 @@ export default function App() {
   // Persistent handler for settings
   const handleSetSettings = async (newValOrFn: any) => {
     setIsSyncing(true);
+    setSyncError(null);
     const updated = typeof newValOrFn === 'function' ? newValOrFn(settings) : newValOrFn;
     setSettings(updated);
     try {
       await firestoreService.saveSettings(updated);
     } catch (e) {
       console.error('Error syncing settings to Firebase:', e);
+      setSyncError('Gagal menyimpan pengaturan ke Firebase Firestore.');
     } finally {
       setIsSyncing(false);
     }
@@ -360,22 +456,29 @@ export default function App() {
   // Persistent handler for rombels
   const handleSetRombels = async (newValOrFn: any) => {
     setIsSyncing(true);
-    const updated = typeof newValOrFn === 'function' ? newValOrFn(rombels) : newValOrFn;
+    setSyncError(null);
+    const prevRombels = rombelsRef.current;
+    const updated = typeof newValOrFn === 'function' ? newValOrFn(prevRombels) : newValOrFn;
+    rombelsRef.current = updated;
     setRombels(updated);
     try {
       if (Array.isArray(updated)) {
         const updatedIds = new Set(updated.map((item: any) => String(item.id)));
-        for (const oldItem of rombels) {
+        for (const oldItem of prevRombels) {
           if (!updatedIds.has(String(oldItem.id))) {
-            await firestoreService.deleteRombel(String(oldItem.id));
+            await firestoreService.deleteRombel(String(oldItem._docId ?? oldItem.id));
           }
         }
         for (const item of updated) {
-          await firestoreService.saveRombel(item);
+          const prev = prevRombels.find((r: any) => String(r.id) === String(item.id));
+          if (!prev || JSON.stringify(prev) !== JSON.stringify(item)) {
+            await firestoreService.saveRombel(item);
+          }
         }
       }
     } catch (e) {
       console.error('Error syncing rombels to Firebase:', e);
+      setSyncError('Gagal memperbarui data rombel di Firebase Firestore.');
     } finally {
       setIsSyncing(false);
     }
@@ -461,8 +564,19 @@ export default function App() {
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8">
+          {syncError && (
+            <div className="mb-4 p-3.5 rounded-xl bg-rose-50 border border-rose-200 flex items-center justify-between text-rose-700 text-sm">
+              <div className="flex items-center space-x-2.5">
+                <AlertCircle size={18} className="flex-shrink-0" />
+                <span className="font-medium">{syncError}</span>
+              </div>
+              <button onClick={() => setSyncError(null)} className="text-rose-500 hover:text-rose-700">
+                <X size={16} />
+              </button>
+            </div>
+          )}
           {activeTab === 'dashboard' && <DashboardView data={pendaftar} rombels={rombels} setActiveTab={setActiveTab} settings={settings} isSyncing={isSyncing} />}
-          {activeTab === 'pendaftar' && <PendaftarView data={pendaftar} setData={handleSetPendaftar} />}
+          {activeTab === 'pendaftar' && <PendaftarView data={pendaftar} setData={handleSetPendaftar} onDelete={handleDeletePendaftar} />}
           {activeTab === 'seleksi' && <SeleksiView data={pendaftar} setData={handleSetPendaftar} settings={settings} setSettings={handleSetSettings} />}
           {activeTab === 'siswabaru' && <SiswaDiterimaView data={pendaftar} settings={settings} setSettings={handleSetSettings} />}
           {activeTab === 'rombel' && <RombelView data={pendaftar} rombels={rombels} setRombels={handleSetRombels} />}
@@ -687,11 +801,12 @@ function DashboardView({ data, rombels, setActiveTab, settings }: any) {
   );
 }
 
-function PendaftarView({ data, setData }: any) {
+function PendaftarView({ data, setData, onDelete }: any) {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [step, setStep] = useState(1);
   const [searchTerm, setSearchTerm] = useState('');
-  const [deleteId, setDeleteId] = useState<any>(null);
+  const [deleteTarget, setDeleteTarget] = useState<any>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   const initialForm: any = {
     regNumber: '', name: '', nickname: '', gender: '', birthPlace: '', birthDate: '',
@@ -723,10 +838,11 @@ function PendaftarView({ data, setData }: any) {
       return;
     }
     // Final Save or Update
-    if (formData.id) {
-      setData(data.map((d: any) => d.id === formData.id ? formData : d));
+    if (formData.id !== undefined && formData.id !== null && formData.id !== '') {
+      setData(data.map((d: any) => String(d.id) === String(formData.id) ? formData : d));
     } else {
-      const newId = data.length ? Math.max(...data.map((d: any) => d.id)) + 1 : 1;
+      const numericIds = data.map((d: any) => Number(d.id)).filter((n: number) => !isNaN(n));
+      const newId = numericIds.length ? Math.max(...numericIds) + 1 : Date.now();
       setData([...data, { ...formData, id: newId }]);
     }
     setIsFormOpen(false);
@@ -751,9 +867,21 @@ function PendaftarView({ data, setData }: any) {
     setIsFormOpen(true);
   };
 
-  const confirmDelete = () => {
-    setData(data.filter((d: any) => d.id !== deleteId));
-    setDeleteId(null);
+  const confirmDelete = async () => {
+    if (!deleteTarget || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      if (onDelete) {
+        await onDelete(deleteTarget);
+      } else {
+        await setData((prevData: any[]) => prevData.filter((d: any) => String(d.id) !== String(deleteTarget.id)));
+      }
+      setDeleteTarget(null);
+    } catch (err) {
+      console.error('Delete failed:', err);
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   const handleExport = () => {
@@ -1017,9 +1145,9 @@ function PendaftarView({ data, setData }: any) {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {filteredData.length > 0 ? filteredData.map((reg: any) => {
-                const isLengkap = Object.values(reg.docs).filter(Boolean).length === 4;
+                const isLengkap = Object.values(reg.docs || {}).filter(Boolean).length === 4;
                 return (
-                  <tr key={reg.id} className="hover:bg-slate-50/80 transition-colors">
+                  <tr key={reg._docId ?? reg.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800">{reg.regNumber}</td>
                     <td className="px-4 py-3">{reg.name}</td>
                     <td className="px-4 py-3">{reg.gender === 'Laki-laki' ? 'L' : 'P'}</td>
@@ -1032,7 +1160,7 @@ function PendaftarView({ data, setData }: any) {
                       <button onClick={() => handleEdit(reg)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition-colors" title="Edit Data">
                         <Edit size={18} />
                       </button>
-                      <button onClick={() => setDeleteId(reg.id)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md transition-colors" title="Hapus Data">
+                      <button onClick={() => setDeleteTarget(reg)} className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md transition-colors" title="Hapus Data">
                         <Trash2 size={18} />
                       </button>
                     </td>
@@ -1047,17 +1175,21 @@ function PendaftarView({ data, setData }: any) {
       </Card>
 
       {/* Modal Konfirmasi Hapus */}
-      {deleteId && (
+      {deleteTarget && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 animate-in zoom-in-95 duration-200">
             <div className="w-12 h-12 rounded-full bg-rose-100 flex items-center justify-center mb-4 text-rose-600">
               <AlertCircle size={24} />
             </div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">Hapus Data Pendaftar?</h3>
-            <p className="text-slate-500 mb-6 text-sm leading-relaxed">Data pendaftar ini akan dihapus secara permanen dan tidak dapat dikembalikan. Apakah Anda yakin ingin melanjutkan?</p>
+            <p className="text-slate-500 mb-6 text-sm leading-relaxed">
+              Data pendaftar <strong>{deleteTarget.name}</strong> ({deleteTarget.regNumber}) akan dihapus secara permanen dari Firebase Firestore dan tidak dapat dikembalikan. Apakah Anda yakin?
+            </p>
             <div className="flex justify-end space-x-3">
-              <Button variant="ghost" onClick={() => setDeleteId(null)}>Batal</Button>
-              <Button variant="danger" onClick={confirmDelete}>Ya, Hapus</Button>
+              <Button variant="ghost" disabled={isDeleting} onClick={() => setDeleteTarget(null)}>Batal</Button>
+              <Button variant="danger" disabled={isDeleting} onClick={confirmDelete}>
+                {isDeleting ? 'Menghapus...' : 'Ya, Hapus Permanen'}
+              </Button>
             </div>
           </div>
         </div>
@@ -1680,7 +1812,16 @@ function RombelView({ data, rombels, setRombels }: any) {
             <Card key={rombel.id} className="p-5">
               <div className="flex justify-between items-center mb-3">
                 <h4 className="font-bold text-lg text-slate-800">{rombel.name}</h4>
-                <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md font-medium border border-slate-200">Kapasitas: {rombel.capacity}</span>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded-md font-medium border border-slate-200">Kapasitas: {rombel.capacity}</span>
+                  <button
+                    onClick={() => setRombels(rombels.filter((r: any) => String(r.id) !== String(rombel.id)))}
+                    className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                    title="Hapus Rombel"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </div>
               </div>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between p-2 bg-slate-50 rounded">
