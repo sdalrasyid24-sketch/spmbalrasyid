@@ -985,7 +985,7 @@ function PendaftarView({ data, setData, onDelete }: any) {
     siblingsDetail: { kandung: '', sebapak: '', seibu: '', tiri: '', angkat: '' },
     livingWith: '', distanceToSchool: '',
     physical: { weight: '', height: '', bloodType: '', chronicDisease: '' },
-    address: '', phone: '',
+    address: '', phone: '', fatherPhone: '', motherPhone: '',
     previousSchool: { name: '', address: '' },
     parent: { fatherName: '', fatherEdu: '', fatherJob: '', motherName: '', motherEdu: '', motherJob: '', parentAddress: '', income: '' },
     guardian: { hasGuardian: false, relation: '', edu: '', job: '', phone: '', address: '' },
@@ -1026,6 +1026,8 @@ function PendaftarView({ data, setData, onDelete }: any) {
     setFormData({
       ...initialForm,
       ...reg,
+      fatherPhone: reg.fatherPhone ?? reg.parent?.fatherPhone ?? reg.phone ?? '',
+      motherPhone: reg.motherPhone ?? reg.parent?.motherPhone ?? '',
       siblingsDetail: { ...initialForm.siblingsDetail, ...(reg.siblingsDetail || {}) },
       physical: { ...initialForm.physical, ...(reg.physical || {}) },
       previousSchool: { ...initialForm.previousSchool, ...(reg.previousSchool || {}) },
@@ -1056,11 +1058,13 @@ function PendaftarView({ data, setData, onDelete }: any) {
   };
 
   const handleExport = () => {
-    const cols = ['No', 'No. Daftar', 'Nama Lengkap', 'Jenis Kelamin', 'Tempat Lahir', 'Tanggal Lahir', 'Nama Ayah', 'Nama Ibu', 'Status Berkas'];
+    const cols = ['No', 'No. Daftar', 'Nama Lengkap', 'Jenis Kelamin', 'Tempat Lahir', 'Tanggal Lahir', 'Nama Ayah', 'Nama Ibu', 'No. Telepon Ayah', 'No. Telepon Ibu', 'Status Berkas'];
     const rows = filteredData.map((d: any, i: number) => {
       const isLengkap = Object.values(d.docs).filter(Boolean).length === 4;
       return [
         i + 1, d.regNumber, d.name, d.gender, d.birthPlace, d.birthDate, d.parent.fatherName, d.parent.motherName,
+        d.fatherPhone || d.parent?.fatherPhone || d.phone || '-',
+        d.motherPhone || d.parent?.motherPhone || '-',
         isLengkap ? 'Persyaratan Lengkap' : 'Persyaratan Belum Lengkap'
       ];
     });
@@ -1146,7 +1150,22 @@ function PendaftarView({ data, setData, onDelete }: any) {
 
                 <div className="space-y-4 p-4 border border-slate-100 bg-slate-50/50 rounded-xl">
                   <Textarea label="13. Alamat Tempat Tinggal" value={formData.address} onChange={(e: any) => setFormData({...formData, address: e.target.value})} required />
-                  <Input label="Telepon" value={formData.phone} onChange={(e: any) => setFormData({...formData, phone: e.target.value})} />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Input
+                      label="No. Telepon Ayah"
+                      type="tel"
+                      placeholder="Contoh: 0812..."
+                      value={formData.fatherPhone}
+                      onChange={(e: any) => setFormData({...formData, fatherPhone: e.target.value})}
+                    />
+                    <Input
+                      label="No. Telepon Ibu"
+                      type="tel"
+                      placeholder="Contoh: 0813..."
+                      value={formData.motherPhone}
+                      onChange={(e: any) => setFormData({...formData, motherPhone: e.target.value})}
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-4">
@@ -1553,7 +1572,8 @@ function SiswaDiterimaView({ data, settings, setSettings }: any) {
       'Golongan Darah',
       'Penyakit (Kronis)',
       'Alamat Tempat Tinggal',
-      'Telepon',
+      'No. Telepon Ayah',
+      'No. Telepon Ibu',
       'Jarak Tempat Tinggal ke Sekolah (km)',
       'Nama Sekolah Asal',
       'Alamat Sekolah Asal',
@@ -1613,7 +1633,8 @@ function SiswaDiterimaView({ data, settings, setSettings }: any) {
       d.physical?.bloodType || '-',
       d.physical?.chronicDisease || '-',
       d.address || '-',
-      d.phone || '-',
+      d.fatherPhone || d.parent?.fatherPhone || d.phone || '-',
+      d.motherPhone || d.parent?.motherPhone || '-',
       d.distanceToSchool || '-',
       d.previousSchool?.name || '-',
       d.previousSchool?.address || '-',

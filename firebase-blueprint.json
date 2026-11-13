@@ -71,6 +71,8 @@
         "motherEducation": { "type": "string" },
         "motherJob": { "type": "string" },
         "motherIncome": { "type": "string" },
+        "fatherPhone": { "type": "string" },
+        "motherPhone": { "type": "string" },
         "parentAddress": { "type": "string" }
       },
       "required": ["studentId"]
