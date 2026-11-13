@@ -7,6 +7,8 @@ import {
   Lock, User, Eye, EyeOff, LogOut, ShieldCheck, Sparkles
 } from 'lucide-react';
 import { firestoreService, initialDefaultSettings } from './services/firestoreService.ts';
+import { PWAInstallButton } from './components/PWAInstallButton.tsx';
+import { OfflineIndicator } from './components/OfflineIndicator.tsx';
 
 // --- UI COMPONENTS ---
 const Card = ({ children, className = "" }: any) => (
@@ -190,6 +192,9 @@ function LoginView({ onLoginSuccess, sessionMessage }: { onLoginSuccess: () => v
           <p className="text-sm text-slate-300 leading-relaxed max-w-md mx-auto md:mx-0">
             Selamat datang di portal administrasi Penerimaan Murid Baru SD Al-Rasyid. Kelola data pendaftar, verifikasi kelengkapan berkas fisik, seleksi penerimaan siswa, hingga pembagian rombongan belajar secara terpadu dan efisien.
           </p>
+          <div className="pt-1 flex justify-center md:justify-start">
+            <PWAInstallButton variant="login" />
+          </div>
         </div>
 
         {/* Sisi Kanan: Kartu Putih Form Login */}
@@ -242,7 +247,7 @@ function LoginView({ onLoginSuccess, sessionMessage }: { onLoginSuccess: () => v
                   <button
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
+                    className="absolute inset-y-0 right-2.5 flex items-center justify-center px-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition-colors"
                     title={showPassword ? 'Sembunyikan Password' : 'Lihat Password'}
                   >
                     {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
@@ -286,7 +291,12 @@ export default function App() {
     return localStorage.getItem(AUTH_KEY) === 'true';
   });
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return window.innerWidth >= 768;
+    }
+    return true;
+  });
   const [idleWarningSeconds, setIdleWarningSeconds] = useState<number | null>(null);
   const lastActivityRef = useRef<number>(
     Number(localStorage.getItem(LAST_ACTIVITY_KEY) || 0) || Date.now()
@@ -422,6 +432,8 @@ export default function App() {
   }, [rombels]);
 
   useEffect(() => {
+    if (!isAuthenticated) return;
+
     // 1. Subscribe to Registrations in Firestore
     const unsubRegistrations = firestoreService.subscribeRegistrations(
       (items) => {
@@ -456,7 +468,7 @@ export default function App() {
       unsubSettings();
       unsubRombels();
     };
-  }, []);
+  }, [isAuthenticated]);
 
   // Persistent handler for registrations (CRUD)
   const handleSetPendaftar = async (newValOrFn: any) => {
@@ -618,23 +630,55 @@ export default function App() {
   ];
 
   if (!isAuthenticated) {
-    return <LoginView onLoginSuccess={handleLoginSuccess} sessionMessage={sessionMessage} />;
+    return (
+      <>
+        <LoginView onLoginSuccess={handleLoginSuccess} sessionMessage={sessionMessage} />
+        <OfflineIndicator />
+      </>
+    );
   }
 
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-slate-50 font-sans text-slate-800">
+    <div className="flex app-shell-height w-full overflow-hidden bg-slate-50 font-sans text-slate-800 relative">
+      {/* Backdrop overlay untuk mobile drawer */}
+      {isSidebarOpen && (
+        <div
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 bg-slate-900/50 z-30 md:hidden"
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className={`bg-slate-900 text-slate-300 w-64 flex-shrink-0 transition-all duration-300 ease-in-out flex flex-col ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full hidden md:flex md:w-20'}`}>
-        <div className="h-16 flex items-center justify-center border-b border-slate-800 px-4">
-          <img src="https://iili.io/Fr7hdzb.png" alt="Logo Al-Rasyid" className="h-8 w-8 object-contain mr-3 flex-shrink-0" />
-          {isSidebarOpen && <span className="font-bold text-lg tracking-tight text-white whitespace-nowrap">SPMB Al-Rasyid</span>}
+      <aside
+        className={`bg-slate-900 text-slate-300 flex-shrink-0 transition-all duration-300 ease-in-out flex flex-col fixed inset-y-0 left-0 z-40 md:static md:z-auto ${
+          isSidebarOpen ? 'w-64 flex' : 'hidden md:flex md:w-20'
+        }`}
+      >
+        <div className="h-16 flex items-center justify-between md:justify-center border-b border-slate-800 px-4">
+          <div className="flex items-center min-w-0">
+            <img src="https://iili.io/Fr7hdzb.png" alt="Logo Al-Rasyid" className="h-8 w-8 object-contain mr-3 flex-shrink-0" />
+            {isSidebarOpen && <span className="font-bold text-lg tracking-tight text-white whitespace-nowrap truncate">SPMB Al-Rasyid</span>}
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(false)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 md:hidden"
+            aria-label="Tutup Menu"
+          >
+            <X size={18} />
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto py-4 scrollbar-thin">
           <nav className="space-y-1 px-3">
             {menuItems.map(item => (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => {
+                  setActiveTab(item.id);
+                  if (typeof window !== 'undefined' && window.innerWidth < 768) {
+                    setIsSidebarOpen(false);
+                  }
+                }}
                 className={`w-full flex items-center px-3 py-3 rounded-xl transition-all duration-200 ${
                   activeTab === item.id 
                     ? 'bg-blue-600 text-white shadow-md shadow-blue-900/50' 
@@ -642,8 +686,8 @@ export default function App() {
                 } ${!isSidebarOpen && 'justify-center'}`}
                 title={!isSidebarOpen ? item.label : ''}
               >
-                <item.icon size={20} className={activeTab === item.id ? 'text-white' : 'text-slate-400'} />
-                {isSidebarOpen && <span className="ml-3 text-sm font-medium">{item.label}</span>}
+                <item.icon size={20} className={activeTab === item.id ? 'text-white flex-shrink-0' : 'text-slate-400 flex-shrink-0'} />
+                {isSidebarOpen && <span className="ml-3 text-sm font-medium whitespace-nowrap">{item.label}</span>}
               </button>
             ))}
           </nav>
@@ -652,23 +696,24 @@ export default function App() {
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50/50">
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-6 z-10 flex-shrink-0">
-          <div className="flex items-center">
-            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 mr-3 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors">
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-3 sm:px-6 z-10 flex-shrink-0">
+          <div className="flex items-center min-w-0">
+            <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 mr-2 sm:mr-3 rounded-lg hover:bg-slate-100 text-slate-500 transition-colors flex-shrink-0" aria-label="Toggle Menu">
               <Menu size={20} />
             </button>
-            <h1 className="text-xl font-bold text-slate-800 hidden sm:block">
+            <h1 className="text-base sm:text-xl font-bold text-slate-800 truncate">
               {menuItems.find(m => m.id === activeTab)?.label}
             </h1>
           </div>
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-2 sm:space-x-3">
+            <PWAInstallButton variant="header" />
             <div className="h-8 w-8 rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-700 font-bold shadow-sm">A</div>
             <span className="text-sm font-medium text-slate-600 hidden sm:block">Admin</span>
             <Button
               variant="danger"
               size="sm"
               onClick={() => handleLogout(false)}
-              className="ml-2 bg-red-600 hover:bg-red-700 text-white focus:ring-red-500"
+              className="ml-1 sm:ml-2 bg-red-600 hover:bg-red-700 text-white focus:ring-red-500"
               title="Keluar"
             >
               <LogOut size={16} className="sm:mr-1.5" />
@@ -731,6 +776,7 @@ export default function App() {
           </div>
         </div>
       )}
+      <OfflineIndicator />
     </div>
   );
 }
@@ -1239,7 +1285,9 @@ function PendaftarView({ data, setData, onDelete }: any) {
     <div className="space-y-6 animate-in fade-in duration-300">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div className="relative w-full sm:w-80">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+          <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+            <Search size={18} />
+          </div>
           <input 
             type="text" placeholder="Cari nama atau no pendaftaran..." 
             className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all shadow-sm"
@@ -1456,10 +1504,9 @@ function SeleksiView({ data, setData, settings }: any) {
                           <option value="Cadangan">Cadangan</option>
                           <option value="Tidak Diterima">Tidak Diterima</option>
                         </select>
-                        <ChevronDown
-                          size={14}
-                          className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-400"
-                        />
+                        <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
+                          <ChevronDown size={14} />
+                        </div>
                       </div>
                     </td>
                   </tr>

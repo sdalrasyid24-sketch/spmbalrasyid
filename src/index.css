@@ -1,1 +1,52 @@
 @import "tailwindcss";
+
+/* Cross-browser & multi-device compatibility defaults */
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background-color: #f8fafc;
+  color: #1e293b;
+}
+
+.app-shell-height {
+  height: 100vh;
+  height: 100dvh;
+}
+
+.overflow-y-auto,
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Fallback Tailwind CSS v4 custom properties for older engines */
+*,
+::before,
+::after {
+  --tw-border-style: solid;
+  --tw-shadow: 0 0 #0000;
+  --tw-inset-shadow: 0 0 #0000;
+  --tw-ring-shadow: 0 0 #0000;
+  --tw-inset-ring-shadow: 0 0 #0000;
+  --tw-ring-offset-shadow: 0 0 #0000;
+}
+
+/* Subtle cross-OS scrollbar */
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: rgba(148, 163, 184, 0.35);
+  border-radius: 9999px;
+}
