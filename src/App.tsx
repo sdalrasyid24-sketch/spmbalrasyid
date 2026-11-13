@@ -114,7 +114,22 @@ const Textarea = ({ label, required, className = "", rows = 3, ...props }: any) 
 );
 
 // --- EXPORT UTILITY ---
-const exportToExcel = (title: string, columns: string[], data: any[][], filename: string) => {
+type ExcelRowStyle = { backgroundColor?: string; color?: string } | null;
+
+const escapeHtmlCell = (val: any) =>
+  String(val !== null && val !== undefined ? val : '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+
+const exportToExcel = (
+  title: string,
+  columns: string[],
+  data: any[][],
+  filename: string,
+  rowStyles?: ExcelRowStyle[]
+) => {
   const tableHtml = `
     <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40">
     <head>
@@ -130,10 +145,18 @@ const exportToExcel = (title: string, columns: string[], data: any[][], filename
     </head>
     <body>
       <table>
-        <tr><td colspan="${columns.length}" class="header-title">${title}</td></tr>
+        <tr><td colspan="${columns.length}" class="header-title">${escapeHtmlCell(title)}</td></tr>
         <tr><td colspan="${columns.length}" class="spacer"></td></tr>
-        <tr>${columns.map(col => `<th>${col}</th>`).join('')}</tr>
-        ${data.map(row => `<tr>${row.map(cell => `<td>${cell !== null && cell !== undefined ? cell : ''}</td>`).join('')}</tr>`).join('')}
+        <tr>${columns.map(col => `<th>${escapeHtmlCell(col)}</th>`).join('')}</tr>
+        ${data
+          .map((row, rowIdx) => {
+            const st = rowStyles?.[rowIdx];
+            const cellStyleAttr = st?.backgroundColor
+              ? ` style="background-color:${st.backgroundColor};color:${st.color || '#000000'};"`
+              : '';
+            return `<tr>${row.map(cell => `<td${cellStyleAttr}>${escapeHtmlCell(cell)}</td>`).join('')}</tr>`;
+          })
+          .join('')}
       </table>
     </body>
     </html>
@@ -625,7 +648,7 @@ export default function App() {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'pendaftar', label: 'Data Pendaftar', icon: Users },
     { id: 'seleksi', label: 'Seleksi & Verifikasi', icon: UserCheck },
-    { id: 'siswabaru', label: 'Siswa Diterima', icon: FileArchive },
+    { id: 'datafinal', label: 'Data Final', icon: FileArchive },
     { id: 'rombel', label: 'Pembagian Rombel', icon: Layers },
   ];
 
@@ -737,7 +760,7 @@ export default function App() {
           {activeTab === 'dashboard' && <DashboardView data={pendaftar} rombels={rombels} setActiveTab={setActiveTab} settings={settings} />}
           {activeTab === 'pendaftar' && <PendaftarView data={pendaftar} setData={handleSetPendaftar} onDelete={handleDeletePendaftar} />}
           {activeTab === 'seleksi' && <SeleksiView data={pendaftar} setData={handleSetPendaftar} settings={settings} setSettings={handleSetSettings} />}
-          {activeTab === 'siswabaru' && <SiswaDiterimaView data={pendaftar} settings={settings} setSettings={handleSetSettings} />}
+          {activeTab === 'datafinal' && <DataFinalView data={pendaftar} settings={settings} setSettings={handleSetSettings} />}
           {activeTab === 'rombel' && <RombelView data={pendaftar} rombels={rombels} setRombels={handleSetRombels} />}
         </div>
       </main>
@@ -1539,11 +1562,27 @@ function SeleksiView({ data, setData, settings }: any) {
   );
 }
 
-function SiswaDiterimaView({ data, settings, setSettings }: any) {
-  const diterimaData = data.filter((d: any) => d.status === 'Diterima');
+function DataFinalView({ data, settings, setSettings }: any) {
+  const [filterStatus, setFilterStatus] = useState<'semua' | 'diterima' | 'cadangan' | 'ditolak'>('semua');
+
+  const diterimaCount = data.filter((d: any) => d.status === 'Diterima').length;
   const kuotaMaks = Number(settings?.kuotaMaksimal) || 0;
-  const isKuotaPenuh = kuotaMaks > 0 && diterimaData.length >= kuotaMaks;
-  
+  const isKuotaPenuh = kuotaMaks > 0 && diterimaCount >= kuotaMaks;
+
+  const filterOptions = [
+    { value: 'semua', label: 'Semua Data' },
+    { value: 'diterima', label: 'Data Siswa Diterima' },
+    { value: 'cadangan', label: 'Data Siswa Cadangan' },
+    { value: 'ditolak', label: 'Data Siswa Ditolak' },
+  ];
+
+  const filteredData = data.filter((d: any) => {
+    if (filterStatus === 'diterima') return d.status === 'Diterima';
+    if (filterStatus === 'cadangan') return d.status === 'Cadangan';
+    if (filterStatus === 'ditolak') return d.status === 'Tidak Diterima';
+    return true;
+  });
+
   const handleExport = () => {
     const cols = [
       'No',
@@ -1606,7 +1645,7 @@ function SiswaDiterimaView({ data, settings, setSettings }: any) {
       'Pas Foto Berwarna 3x4 (2 Lembar)',
       'Status Seleksi'
     ];
-    const rows = diterimaData.map((d: any, i: number) => [
+    const rows = filteredData.map((d: any, i: number) => [
       i + 1,
       d.regNumber || '-',
       '-',
@@ -1667,7 +1706,42 @@ function SiswaDiterimaView({ data, settings, setSettings }: any) {
       d.docs?.foto ? 'Ada' : 'Tidak Ada',
       d.status || '-'
     ]);
-    exportToExcel('DATA SISWA DITERIMA (TU) SD AL-RASYID', cols, rows, 'Data_Siswa_Diterima');
+
+    // Hanya tandai merah (ditolak) dan orange (cadangan) saat filter berada di posisi Semua Data
+    const rowStyles: ExcelRowStyle[] | undefined =
+      filterStatus === 'semua'
+        ? filteredData.map((d: any) => {
+            if (d.status === 'Tidak Diterima') {
+              return { backgroundColor: '#fecaca', color: '#7f1d1d' };
+            }
+            if (d.status === 'Cadangan') {
+              return { backgroundColor: '#fed7aa', color: '#7c2d12' };
+            }
+            return null;
+          })
+        : undefined;
+
+    const exportMeta: Record<string, { title: string; filename: string }> = {
+      semua: {
+        title: 'DATA FINAL SPMB (SEMUA DATA) SD AL-RASYID',
+        filename: 'Data_Final_Semua_Data',
+      },
+      diterima: {
+        title: 'DATA FINAL SISWA DITERIMA (TU) SD AL-RASYID',
+        filename: 'Data_Final_Siswa_Diterima',
+      },
+      cadangan: {
+        title: 'DATA FINAL SISWA CADANGAN SD AL-RASYID',
+        filename: 'Data_Final_Siswa_Cadangan',
+      },
+      ditolak: {
+        title: 'DATA FINAL SISWA DITOLAK SD AL-RASYID',
+        filename: 'Data_Final_Siswa_Ditolak',
+      },
+    };
+
+    const meta = exportMeta[filterStatus];
+    exportToExcel(meta.title, cols, rows, meta.filename, rowStyles);
   };
 
   return (
@@ -1676,12 +1750,26 @@ function SiswaDiterimaView({ data, settings, setSettings }: any) {
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex items-start space-x-3 flex-1">
           <FileArchive className="text-blue-600 mt-0.5 flex-shrink-0" size={20} />
           <div>
-            <h4 className="font-semibold text-blue-900">Database Tata Usaha (Siswa Diterima)</h4>
-            <p className="text-sm text-blue-700 mt-1">Hanya pendaftar yang dinyatakan "Diterima" yang akan masuk ke daftar ini untuk dilengkapi datanya oleh TU.</p>
+            <h4 className="font-semibold text-blue-900">Data Final & Database Tata Usaha</h4>
+            <p className="text-sm text-blue-700 mt-1">
+              Menampilkan rekap data final pendaftar sesuai filter status seleksi. Hasil export Excel akan mengikuti data yang sedang difilter.
+            </p>
+            {filterStatus === 'semua' && (
+              <div className="flex flex-wrap items-center gap-4 mt-2.5 text-xs font-medium text-slate-700">
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-orange-200 border border-orange-400 inline-block" />
+                  Cadangan
+                </span>
+                <span className="inline-flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-red-200 border border-red-400 inline-block" />
+                  Ditolak
+                </span>
+              </div>
+            )}
           </div>
         </div>
 
-        <Card className="p-4 flex flex-col sm:flex-row sm:items-center gap-4 border-emerald-200 bg-white">
+        <Card className="p-4 flex flex-col sm:flex-row sm:items-end gap-4 border-emerald-200 bg-white">
           <div>
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
               Jumlah Kuota yang Akan Diterima
@@ -1696,12 +1784,40 @@ function SiswaDiterimaView({ data, settings, setSettings }: any) {
                 className="w-28 px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white transition-all text-sm font-bold text-slate-800"
               />
               <span className="text-xs font-medium text-slate-500 whitespace-nowrap">
-                Terisi: <strong className="text-emerald-600">{diterimaData.length}</strong> / {kuotaMaks} Siswa
+                Terisi: <strong className="text-emerald-600">{diterimaCount}</strong> / {kuotaMaks} Siswa
               </span>
             </div>
           </div>
-          <Button variant="outline" onClick={handleExport} className="text-emerald-700 border-emerald-200 hover:bg-emerald-50 whitespace-nowrap">
-            <Download size={18} className="mr-2" /> Export Excel
+
+          <div className="min-w-[200px]">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">
+              Filter Data Final
+            </label>
+            <div className="relative">
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value as any)}
+                className="w-full appearance-none pl-3.5 pr-9 py-2 text-sm font-semibold rounded-xl border border-slate-200 bg-slate-50 text-slate-700 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 focus:bg-white cursor-pointer transition-all"
+              >
+                {filterOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+              <div className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-slate-400">
+                <ChevronDown size={16} />
+              </div>
+            </div>
+          </div>
+
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            disabled={filteredData.length === 0}
+            className="text-emerald-700 border-emerald-200 hover:bg-emerald-50 whitespace-nowrap"
+          >
+            <Download size={18} className="mr-2" /> Export Excel ({filteredData.length})
           </Button>
         </Card>
       </div>
@@ -1710,7 +1826,7 @@ function SiswaDiterimaView({ data, settings, setSettings }: any) {
         <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 flex items-start space-x-3 text-amber-800 shadow-sm">
           <AlertCircle size={20} className="text-amber-600 flex-shrink-0 mt-0.5" />
           <div className="text-sm">
-            <p className="font-bold text-amber-900">Pemberitahuan Sistem: Kuota Siswa Diterima Telah Mencapai Batas ({diterimaData.length} / {kuotaMaks} Siswa)</p>
+            <p className="font-bold text-amber-900">Pemberitahuan Sistem: Kuota Siswa Diterima Telah Mencapai Batas ({diterimaCount} / {kuotaMaks} Siswa)</p>
             <p className="text-amber-700 mt-0.5">
               Jumlah siswa diterima telah mencapai batas kuota yang ditetapkan. Anda dapat mengubah angka pada field <strong>Jumlah Kuota yang Akan Diterima</strong> di atas jika ingin menyesuaikan kapasitas.
             </p>
@@ -1726,21 +1842,51 @@ function SiswaDiterimaView({ data, settings, setSettings }: any) {
                 <th className="px-4 py-3">No. Pendaftaran</th>
                 <th className="px-4 py-3">Nama Siswa</th>
                 <th className="px-4 py-3">L/P</th>
+                <th className="px-4 py-3">Status Seleksi</th>
                 <th className="px-4 py-3">NIS Lokal</th>
                 <th className="px-4 py-3">NISN Nasional</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {diterimaData.length > 0 ? diterimaData.map((student: any) => (
-                <tr key={student.id} className="hover:bg-slate-50/80 transition-colors">
-                  <td className="px-4 py-3 font-medium text-slate-800">{student.regNumber}</td>
-                  <td className="px-4 py-3">{student.name}</td>
-                  <td className="px-4 py-3">{student.gender === 'Laki-laki' ? 'L' : 'P'}</td>
-                  <td className="px-4 py-3 text-slate-400 italic">Belum diisi</td>
-                  <td className="px-4 py-3 text-slate-400 italic">Belum diisi</td>
+              {filteredData.length > 0 ? filteredData.map((student: any) => {
+                const isAllFilter = filterStatus === 'semua';
+                const rowColorClass =
+                  isAllFilter && student.status === 'Tidak Diterima'
+                    ? 'bg-red-100/80 hover:bg-red-100 text-red-950'
+                    : isAllFilter && student.status === 'Cadangan'
+                    ? 'bg-orange-100/80 hover:bg-orange-100 text-orange-950'
+                    : 'hover:bg-slate-50/80';
+
+                const statusBadgeClass = isAllFilter
+                  ? student.status === 'Diterima'
+                    ? 'bg-emerald-100 text-emerald-700'
+                    : student.status === 'Cadangan'
+                    ? 'bg-orange-200 text-orange-900'
+                    : student.status === 'Tidak Diterima'
+                    ? 'bg-red-200 text-red-900'
+                    : 'bg-slate-100 text-slate-700'
+                  : 'bg-slate-100 text-slate-700';
+
+                return (
+                  <tr key={student._docId ?? student.id} className={`transition-colors ${rowColorClass}`}>
+                    <td className="px-4 py-3 font-medium">{student.regNumber}</td>
+                    <td className="px-4 py-3 font-medium">{student.name}</td>
+                    <td className="px-4 py-3">{student.gender === 'Laki-laki' ? 'L' : 'P'}</td>
+                    <td className="px-4 py-3">
+                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusBadgeClass}`}>
+                        {student.status || 'Menunggu Keputusan'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-400 italic">Belum diisi</td>
+                    <td className="px-4 py-3 text-slate-400 italic">Belum diisi</td>
+                  </tr>
+                );
+              }) : (
+                <tr>
+                  <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
+                    Belum ada data pada filter {filterOptions.find(o => o.value === filterStatus)?.label}.
+                  </td>
                 </tr>
-              )) : (
-                <tr><td colSpan={5} className="px-4 py-12 text-center text-slate-500">Belum ada siswa diterima.</td></tr>
               )}
             </tbody>
           </table>
