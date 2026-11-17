@@ -177,6 +177,20 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["userName", "userRole", "action", "module", "description"]
+    },
+    "ExamGroup": {
+      "title": "ExamGroup",
+      "description": "Data pembagian kelompok ujian dan penguji calon murid baru",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "examinerName": { "type": "string" },
+        "groupName": { "type": "string" },
+        "capacity": { "type": "number" },
+        "students": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["examinerName", "capacity"]
     }
   },
   "firestore": {
@@ -215,6 +229,10 @@
     "/activity_logs/{logId}": {
       "schema": { "$ref": "#/entities/ActivityLog" },
       "description": "Log aktivitas dan audit"
+    },
+    "/exam_groups/{groupId}": {
+      "schema": { "$ref": "#/entities/ExamGroup" },
+      "description": "Koleksi pembagian kelompok ujian dan penguji"
     }
   }
 }

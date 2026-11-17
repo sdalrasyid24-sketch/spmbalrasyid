@@ -52,6 +52,11 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    // Pembagian Kelompok Ujian (Exam Groups)
+    match /exam_groups/{groupId} {
+      allow read, write: if true;
+    }
+
     // New Students Database (TU)
     match /new_students/{newStudentId} {
       allow read, write: if true;

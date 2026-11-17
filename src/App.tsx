@@ -4,7 +4,7 @@ import {
   Plus, Search, CheckCircle, XCircle, AlertCircle, Save, UserPlus, 
   BookOpen, ChevronRight, FileArchive, ChevronLeft, Download, Check, 
   ChevronDown, Layers, FileCheck, Clock, ArrowRight, Activity, Trash2, Edit, CalendarDays,
-  Lock, User, Eye, EyeOff, LogOut, ShieldCheck, Sparkles
+  Lock, User, Eye, EyeOff, LogOut, ShieldCheck, Sparkles, ClipboardList
 } from 'lucide-react';
 import { firestoreService, initialDefaultSettings } from './services/firestoreService.ts';
 import { PWAInstallButton } from './components/PWAInstallButton.tsx';
@@ -172,6 +172,55 @@ const exportToExcel = (
   URL.revokeObjectURL(url);
 };
 
+// --- AGE CALCULATION UTILITY ---
+const calculateDetailedAge = (birthDateStr?: string): { years: number; months: number; days: number; label: string } | null => {
+  if (!birthDateStr || typeof birthDateStr !== 'string') return null;
+  const parts = birthDateStr.trim().split('-');
+  if (parts.length !== 3) return null;
+  const birthYear = Number(parts[0]);
+  const birthMonth = Number(parts[1]);
+  const birthDay = Number(parts[2]);
+  if (!birthYear || !birthMonth || !birthDay) return null;
+
+  const birthCheck = new Date(birthYear, birthMonth - 1, birthDay);
+  if (
+    isNaN(birthCheck.getTime()) ||
+    birthCheck.getFullYear() !== birthYear ||
+    birthCheck.getMonth() !== birthMonth - 1 ||
+    birthCheck.getDate() !== birthDay
+  ) {
+    return null;
+  }
+
+  const today = new Date();
+  const refYear = today.getFullYear();
+  const refMonth = today.getMonth() + 1;
+  const refDay = today.getDate();
+
+  let years = refYear - birthYear;
+  let months = refMonth - birthMonth;
+  let days = refDay - birthDay;
+
+  if (days < 0) {
+    months -= 1;
+    const prevMonthLastDay = new Date(refYear, refMonth - 1, 0).getDate();
+    days += prevMonthLastDay;
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+
+  if (years < 0) return null;
+
+  return {
+    years,
+    months,
+    days,
+    label: `${years} tahun ${months} bulan ${days} hari`,
+  };
+};
+
 // --- LOGIN COMPONENT ---
 function LoginView({ onLoginSuccess, sessionMessage }: { onLoginSuccess: () => void; sessionMessage?: string | null }) {
   const [username, setUsername] = useState('');
@@ -223,6 +272,13 @@ function LoginView({ onLoginSuccess, sessionMessage }: { onLoginSuccess: () => v
         {/* Sisi Kanan: Kartu Putih Form Login */}
         <div className="md:col-span-5 relative z-10">
           <Card className="p-6 sm:p-8 border-slate-200 shadow-xl rounded-2xl bg-white">
+            <div className="mb-5">
+              <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Silahkan Login</h2>
+              <p className="text-xs text-slate-500 mt-1">
+                Silahkan masukan username dan password untuk login
+              </p>
+            </div>
+
             {sessionMessage && !error && (
               <div className="mb-5 p-3.5 rounded-xl bg-amber-50 border border-amber-200 flex items-start space-x-2.5 text-amber-800 text-sm animate-in fade-in duration-200">
                 <Clock size={18} className="flex-shrink-0 mt-0.5 text-amber-600" />
@@ -438,12 +494,14 @@ export default function App() {
   // Data State for Application - Synchronized with Firebase Firestore
   const [pendaftar, setPendaftar] = useState<any[]>([]);
   const [rombels, setRombels] = useState<any[]>([]);
+  const [examGroups, setExamGroups] = useState<any[]>([]);
   const [settings, setSettings] = useState<any>(initialDefaultSettings);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
   const pendaftarRef = useRef<any[]>([]);
   const rombelsRef = useRef<any[]>([]);
+  const examGroupsRef = useRef<any[]>([]);
   const pendingDeleteDocIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -453,6 +511,10 @@ export default function App() {
   useEffect(() => {
     rombelsRef.current = rombels;
   }, [rombels]);
+
+  useEffect(() => {
+    examGroupsRef.current = examGroups;
+  }, [examGroups]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -486,10 +548,17 @@ export default function App() {
       setRombels(savedRombels);
     });
 
+    // 4. Subscribe to Exam Groups in Firestore
+    const unsubExamGroups = firestoreService.subscribeExamGroups((savedGroups) => {
+      examGroupsRef.current = savedGroups;
+      setExamGroups(savedGroups);
+    });
+
     return () => {
       unsubRegistrations();
       unsubSettings();
       unsubRombels();
+      unsubExamGroups();
     };
   }, [isAuthenticated]);
 
@@ -518,7 +587,7 @@ export default function App() {
           }
         }
 
-        // Remove deleted student IDs from any rombel
+        // Remove deleted student IDs from any rombel or exam group
         if (deletedItems.length > 0) {
           const deletedIdStrings = new Set(deletedItems.map((d: any) => String(d.id)));
           const currentRombels = rombelsRef.current;
@@ -534,6 +603,22 @@ export default function App() {
             setRombels(updatedRombels);
             for (const r of updatedRombels) {
               await firestoreService.saveRombel(r);
+            }
+          }
+
+          const currentExamGroups = examGroupsRef.current;
+          const updatedExamGroups = currentExamGroups.map((g: any) => ({
+            ...g,
+            students: (g.students || []).filter((sid: any) => !deletedIdStrings.has(String(sid)))
+          }));
+          const hasExamGroupChanges = updatedExamGroups.some(
+            (g: any, idx: number) => (g.students?.length || 0) !== (currentExamGroups[idx]?.students?.length || 0)
+          );
+          if (hasExamGroupChanges) {
+            examGroupsRef.current = updatedExamGroups;
+            setExamGroups(updatedExamGroups);
+            for (const g of updatedExamGroups) {
+              await firestoreService.saveExamGroup(g);
             }
           }
         }
@@ -571,7 +656,7 @@ export default function App() {
     try {
       await firestoreService.deleteRegistration(docId);
 
-      // Remove deleted student from any rombel
+      // Remove deleted student from any rombel or exam group
       const currentRombels = rombelsRef.current;
       const updatedRombels = currentRombels.map((r: any) => ({
         ...r,
@@ -585,6 +670,22 @@ export default function App() {
         setRombels(updatedRombels);
         for (const r of updatedRombels) {
           await firestoreService.saveRombel(r);
+        }
+      }
+
+      const currentExamGroups = examGroupsRef.current;
+      const updatedExamGroups = currentExamGroups.map((g: any) => ({
+        ...g,
+        students: (g.students || []).filter((sid: any) => String(sid) !== String(targetId))
+      }));
+      const hasExamGroupChanges = updatedExamGroups.some(
+        (g: any, idx: number) => (g.students?.length || 0) !== (currentExamGroups[idx]?.students?.length || 0)
+      );
+      if (hasExamGroupChanges) {
+        examGroupsRef.current = updatedExamGroups;
+        setExamGroups(updatedExamGroups);
+        for (const g of updatedExamGroups) {
+          await firestoreService.saveExamGroup(g);
         }
       }
     } catch (e) {
@@ -644,9 +745,41 @@ export default function App() {
     }
   };
 
+  // Persistent handler for exam groups
+  const handleSetExamGroups = async (newValOrFn: any) => {
+    setIsSyncing(true);
+    setSyncError(null);
+    const prevGroups = examGroupsRef.current;
+    const updated = typeof newValOrFn === 'function' ? newValOrFn(prevGroups) : newValOrFn;
+    examGroupsRef.current = updated;
+    setExamGroups(updated);
+    try {
+      if (Array.isArray(updated)) {
+        const updatedIds = new Set(updated.map((item: any) => String(item.id)));
+        for (const oldItem of prevGroups) {
+          if (!updatedIds.has(String(oldItem.id))) {
+            await firestoreService.deleteExamGroup(String(oldItem._docId ?? oldItem.id));
+          }
+        }
+        for (const item of updated) {
+          const prev = prevGroups.find((g: any) => String(g.id) === String(item.id));
+          if (!prev || JSON.stringify(prev) !== JSON.stringify(item)) {
+            await firestoreService.saveExamGroup(item);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error syncing exam groups to Firebase:', e);
+      setSyncError('Gagal memperbarui data kelompok ujian di Firebase Firestore.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'pendaftar', label: 'Data Pendaftar', icon: Users },
+    { id: 'kelompokujian', label: 'Kelompok Ujian', icon: ClipboardList },
     { id: 'seleksi', label: 'Seleksi & Verifikasi', icon: UserCheck },
     { id: 'datafinal', label: 'Data Final', icon: FileArchive },
     { id: 'rombel', label: 'Pembagian Rombel', icon: Layers },
@@ -759,6 +892,7 @@ export default function App() {
           )}
           {activeTab === 'dashboard' && <DashboardView data={pendaftar} rombels={rombels} setActiveTab={setActiveTab} settings={settings} />}
           {activeTab === 'pendaftar' && <PendaftarView data={pendaftar} setData={handleSetPendaftar} onDelete={handleDeletePendaftar} />}
+          {activeTab === 'kelompokujian' && <KelompokUjianView data={pendaftar} examGroups={examGroups} setExamGroups={handleSetExamGroups} />}
           {activeTab === 'seleksi' && <SeleksiView data={pendaftar} setData={handleSetPendaftar} settings={settings} setSettings={handleSetSettings} />}
           {activeTab === 'datafinal' && <DataFinalView data={pendaftar} settings={settings} setSettings={handleSetSettings} />}
           {activeTab === 'rombel' && <RombelView data={pendaftar} rombels={rombels} setRombels={handleSetRombels} />}
@@ -1081,11 +1215,13 @@ function PendaftarView({ data, setData, onDelete }: any) {
   };
 
   const handleExport = () => {
-    const cols = ['No', 'No. Daftar', 'Nama Lengkap', 'Jenis Kelamin', 'Tempat Lahir', 'Tanggal Lahir', 'Nama Ayah', 'Nama Ibu', 'No. Telepon Ayah', 'No. Telepon Ibu', 'Status Berkas'];
+    const cols = ['No', 'No. Daftar', 'Nama Lengkap', 'Jenis Kelamin', 'Tempat Lahir', 'Tanggal Lahir', 'Umur', 'Nama Ayah', 'Nama Ibu', 'No. Telepon Ayah', 'No. Telepon Ibu', 'Status Berkas'];
     const rows = filteredData.map((d: any, i: number) => {
       const isLengkap = Object.values(d.docs).filter(Boolean).length === 4;
+      const ageInfo = calculateDetailedAge(d.birthDate);
       return [
-        i + 1, d.regNumber, d.name, d.gender, d.birthPlace, d.birthDate, d.parent.fatherName, d.parent.motherName,
+        i + 1, d.regNumber, d.name, d.gender, d.birthPlace, d.birthDate, ageInfo ? ageInfo.label : '-',
+        d.parent.fatherName, d.parent.motherName,
         d.fatherPhone || d.parent?.fatherPhone || d.phone || '-',
         d.motherPhone || d.parent?.motherPhone || '-',
         isLengkap ? 'Persyaratan Lengkap' : 'Persyaratan Belum Lengkap'
@@ -1128,7 +1264,15 @@ function PendaftarView({ data, setData, onDelete }: any) {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <Select label="2. Jenis Kelamin" options={[{value:'Laki-laki', label:'Laki-laki'}, {value:'Perempuan', label:'Perempuan'}]} value={formData.gender} onChange={(e: any) => setFormData({...formData, gender: e.target.value})} required />
                   <Input label="3. Tempat Lahir" value={formData.birthPlace} onChange={(e: any) => setFormData({...formData, birthPlace: e.target.value})} required />
-                  <Input label="4. Tanggal Lahir" type="date" value={formData.birthDate} onChange={(e: any) => setFormData({...formData, birthDate: e.target.value})} required />
+                  <div>
+                    <Input label="4. Tanggal Lahir" type="date" value={formData.birthDate} onChange={(e: any) => setFormData({...formData, birthDate: e.target.value})} required />
+                    {formData.birthDate && (
+                      <p className="mt-1.5 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-2.5 py-1.5">
+                        Umur otomatis:{' '}
+                        <strong>{calculateDetailedAge(formData.birthDate)?.label || 'Tanggal lahir tidak valid'}</strong>
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1354,6 +1498,7 @@ function PendaftarView({ data, setData, onDelete }: any) {
                 <th className="px-4 py-3">No. Daftar</th>
                 <th className="px-4 py-3">Nama Pendaftar</th>
                 <th className="px-4 py-3">L/P</th>
+                <th className="px-4 py-3">Umur</th>
                 <th className="px-4 py-3">Berkas Fisik</th>
                 <th className="px-4 py-3 text-right">Aksi</th>
               </tr>
@@ -1361,11 +1506,15 @@ function PendaftarView({ data, setData, onDelete }: any) {
             <tbody className="divide-y divide-slate-100">
               {filteredData.length > 0 ? filteredData.map((reg: any) => {
                 const isLengkap = Object.values(reg.docs || {}).filter(Boolean).length === 4;
+                const ageInfo = calculateDetailedAge(reg.birthDate);
                 return (
                   <tr key={reg._docId ?? reg.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-4 py-3 font-medium text-slate-800">{reg.regNumber}</td>
                     <td className="px-4 py-3">{reg.name}</td>
                     <td className="px-4 py-3">{reg.gender === 'Laki-laki' ? 'L' : 'P'}</td>
+                    <td className="px-4 py-3 text-xs font-medium text-slate-700 whitespace-nowrap">
+                      {ageInfo ? ageInfo.label : '-'}
+                    </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${isLengkap ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
                         {isLengkap ? 'Persyaratan Lengkap' : 'Persyaratan Belum Lengkap'}
@@ -1382,7 +1531,7 @@ function PendaftarView({ data, setData, onDelete }: any) {
                   </tr>
                 )
               }) : (
-                <tr><td colSpan={5} className="px-4 py-12 text-center text-slate-500">Tidak ada data pendaftar yang ditemukan.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-12 text-center text-slate-500">Tidak ada data pendaftar yang ditemukan.</td></tr>
               )}
             </tbody>
           </table>
@@ -1514,9 +1663,15 @@ function SeleksiView({ data, setData, settings }: any) {
             <tbody className="divide-y divide-slate-100">
               {data.map((reg: any) => {
                 const isLengkap = Object.values(reg.docs).filter(Boolean).length === 4;
+                const ageInfo = calculateDetailedAge(reg.birthDate);
                 return (
                   <tr key={reg.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-4 py-3 font-medium text-slate-800">{reg.name}</td>
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-slate-800">{reg.name}</div>
+                      {ageInfo && (
+                        <div className="text-xs text-slate-500 mt-0.5">Umur: {ageInfo.label}</div>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-xs">{isLengkap ? 'Lengkap (4/4)' : 'Belum Lengkap'}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium 
@@ -1594,6 +1749,7 @@ function DataFinalView({ data, settings, setSettings }: any) {
       'Jenis Kelamin',
       'Tempat Lahir',
       'Tanggal Lahir',
+      'Umur',
       'Agama',
       'Kewarganegaraan',
       'Anak Ke',
@@ -1655,6 +1811,7 @@ function DataFinalView({ data, settings, setSettings }: any) {
       d.gender || '-',
       d.birthPlace || '-',
       d.birthDate || '-',
+      calculateDetailedAge(d.birthDate)?.label || '-',
       d.religion || '-',
       d.nationality || '-',
       d.childOrder || '-',
@@ -1842,6 +1999,7 @@ function DataFinalView({ data, settings, setSettings }: any) {
                 <th className="px-4 py-3">No. Pendaftaran</th>
                 <th className="px-4 py-3">Nama Siswa</th>
                 <th className="px-4 py-3">L/P</th>
+                <th className="px-4 py-3">Umur</th>
                 <th className="px-4 py-3">Status Seleksi</th>
                 <th className="px-4 py-3">NIS Lokal</th>
                 <th className="px-4 py-3">NISN Nasional</th>
@@ -1850,6 +2008,7 @@ function DataFinalView({ data, settings, setSettings }: any) {
             <tbody className="divide-y divide-slate-100">
               {filteredData.length > 0 ? filteredData.map((student: any) => {
                 const isAllFilter = filterStatus === 'semua';
+                const ageInfo = calculateDetailedAge(student.birthDate);
                 const rowColorClass =
                   isAllFilter && student.status === 'Tidak Diterima'
                     ? 'bg-red-100/80 hover:bg-red-100 text-red-950'
@@ -1872,6 +2031,7 @@ function DataFinalView({ data, settings, setSettings }: any) {
                     <td className="px-4 py-3 font-medium">{student.regNumber}</td>
                     <td className="px-4 py-3 font-medium">{student.name}</td>
                     <td className="px-4 py-3">{student.gender === 'Laki-laki' ? 'L' : 'P'}</td>
+                    <td className="px-4 py-3 text-xs whitespace-nowrap">{ageInfo ? ageInfo.label : '-'}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusBadgeClass}`}>
                         {student.status || 'Menunggu Keputusan'}
@@ -1883,7 +2043,7 @@ function DataFinalView({ data, settings, setSettings }: any) {
                 );
               }) : (
                 <tr>
-                  <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
+                  <td colSpan={7} className="px-4 py-12 text-center text-slate-500">
                     Belum ada data pada filter {filterOptions.find(o => o.value === filterStatus)?.label}.
                   </td>
                 </tr>
@@ -2179,6 +2339,394 @@ function RombelView({ data, rombels, setRombels }: any) {
             </Card>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function KelompokUjianView({ data, examGroups, setExamGroups }: any) {
+  const [isAdding, setIsAdding] = useState(false);
+  const [newGroup, setNewGroup] = useState({ examinerName: '', groupName: '', capacity: 15 });
+
+  const unassigned = data.filter(
+    (d: any) => !examGroups.some((g: any) => (g.students || []).some((sid: any) => String(sid) === String(d.id)))
+  );
+  const unassignedLaki = unassigned.filter((d: any) => d.gender === 'Laki-laki').length;
+  const unassignedPerempuan = unassigned.filter((d: any) => d.gender === 'Perempuan').length;
+
+  const handleAddGroup = (e: any) => {
+    e.preventDefault();
+    const examinerName = newGroup.examinerName.trim();
+    const capacity = Math.max(1, Number(newGroup.capacity) || 1);
+    if (!examinerName) return;
+
+    setExamGroups([
+      ...examGroups,
+      {
+        id: Date.now(),
+        examinerName,
+        groupName: newGroup.groupName.trim(),
+        capacity,
+        students: [],
+      },
+    ]);
+    setIsAdding(false);
+    setNewGroup({ examinerName: '', groupName: '', capacity: 15 });
+  };
+
+  const handleBagiOtomatis = () => {
+    if (unassigned.length === 0 || examGroups.length === 0) return;
+
+    const poolLaki = [...unassigned.filter((d: any) => d.gender === 'Laki-laki')];
+    const poolPerempuan = [...unassigned.filter((d: any) => d.gender === 'Perempuan')];
+    const poolOther = [
+      ...unassigned.filter((d: any) => d.gender !== 'Laki-laki' && d.gender !== 'Perempuan'),
+    ];
+
+    const updatedGroups = examGroups.map((group: any) => {
+      const currentStudents = [...(group.students || [])];
+      const cap = Math.max(0, Number(group.capacity) || 0);
+      let remaining = Math.max(0, cap - currentStudents.length);
+
+      let takeMaleNext = true;
+      while (remaining > 0 && (poolLaki.length > 0 || poolPerempuan.length > 0 || poolOther.length > 0)) {
+        let picked: any = null;
+        if (takeMaleNext && poolLaki.length > 0) {
+          picked = poolLaki.shift();
+        } else if (!takeMaleNext && poolPerempuan.length > 0) {
+          picked = poolPerempuan.shift();
+        } else if (poolLaki.length > 0) {
+          picked = poolLaki.shift();
+        } else if (poolPerempuan.length > 0) {
+          picked = poolPerempuan.shift();
+        } else if (poolOther.length > 0) {
+          picked = poolOther.shift();
+        }
+        takeMaleNext = !takeMaleNext;
+        if (picked) {
+          currentStudents.push(picked.id);
+          remaining--;
+        }
+      }
+
+      return { ...group, students: currentStudents };
+    });
+
+    setExamGroups(updatedGroups);
+  };
+
+  const handleRemoveStudent = (groupId: any, studentId: any) => {
+    setExamGroups(
+      examGroups.map((g: any) =>
+        String(g.id) === String(groupId)
+          ? { ...g, students: (g.students || []).filter((sid: any) => String(sid) !== String(studentId)) }
+          : g
+      )
+    );
+  };
+
+  const handleExportExamGroups = () => {
+    if (examGroups.length === 0) return;
+
+    const escapeXml = (val: any) =>
+      String(val ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+
+    const usedNames = new Set<string>();
+    const worksheetsXml = examGroups
+      .map((group: any, idx: number) => {
+        const rawTitle = group.groupName
+          ? `${group.groupName} - ${group.examinerName}`
+          : group.examinerName || `Penguji ${idx + 1}`;
+        const baseName =
+          String(rawTitle)
+            .replace(/[\\/?*:[\]]/g, ' ')
+            .trim()
+            .slice(0, 28) || `Penguji ${idx + 1}`;
+        let sheetName = baseName;
+        let counter = 1;
+        while (usedNames.has(sheetName.toLowerCase())) {
+          sheetName = `${baseName.slice(0, 24)} (${counter++})`;
+        }
+        usedNames.add(sheetName.toLowerCase());
+
+        const stds = (group.students || [])
+          .map((id: any) => data.find((d: any) => String(d.id) === String(id)))
+          .filter(Boolean);
+
+        const totalRows = Math.max(Number(group.capacity) || 1, stds.length);
+        let rowsXml = '';
+
+        for (let i = 0; i < totalRows; i++) {
+          const s = stds[i];
+          const ageInfo = s ? calculateDetailedAge(s.birthDate) : null;
+          rowsXml += `
+        <Row ss:Height="20">
+          <Cell ss:StyleID="sCenter"><Data ss:Type="Number">${i + 1}</Data></Cell>
+          <Cell ss:StyleID="sCenter"><Data ss:Type="String">${escapeXml(s?.regNumber || '')}</Data></Cell>
+          <Cell ss:StyleID="sLeft"><Data ss:Type="String">${escapeXml(s?.name || '')}</Data></Cell>
+          <Cell ss:StyleID="sCenter"><Data ss:Type="String">${escapeXml(s ? (s.gender === 'Laki-laki' ? 'L' : 'P') : '')}</Data></Cell>
+          <Cell ss:StyleID="sLeft"><Data ss:Type="String">${escapeXml(ageInfo ? ageInfo.label : '')}</Data></Cell>
+          <Cell ss:StyleID="sLeft"><Data ss:Type="String">${escapeXml(s ? (s.fatherPhone || s.parent?.fatherPhone || s.phone || '') : '')}</Data></Cell>
+          <Cell ss:StyleID="sLeft"><Data ss:Type="String">${escapeXml(s ? (s.motherPhone || s.parent?.motherPhone || '') : '')}</Data></Cell>
+        </Row>`;
+        }
+
+        const headerInfo = group.groupName
+          ? `Penguji: ${group.examinerName} (${group.groupName})`
+          : `Penguji: ${group.examinerName}`;
+
+        return `
+      <Worksheet ss:Name="${escapeXml(sheetName)}">
+        <Table>
+          <Column ss:Width="35"/>
+          <Column ss:Width="95"/>
+          <Column ss:Width="195"/>
+          <Column ss:Width="45"/>
+          <Column ss:Width="145"/>
+          <Column ss:Width="115"/>
+          <Column ss:Width="115"/>
+          <Row ss:Height="24">
+            <Cell ss:MergeAcross="6" ss:StyleID="sHeader"><Data ss:Type="String">${escapeXml(headerInfo)}</Data></Cell>
+          </Row>
+          <Row ss:Height="26">
+            <Cell ss:StyleID="sHeader"><Data ss:Type="String">No</Data></Cell>
+            <Cell ss:StyleID="sHeader"><Data ss:Type="String">No. Daftar</Data></Cell>
+            <Cell ss:StyleID="sHeader"><Data ss:Type="String">Nama Calon Murid</Data></Cell>
+            <Cell ss:StyleID="sHeader"><Data ss:Type="String">L/P</Data></Cell>
+            <Cell ss:StyleID="sHeader"><Data ss:Type="String">Umur</Data></Cell>
+            <Cell ss:StyleID="sHeader"><Data ss:Type="String">No. Telp Ayah</Data></Cell>
+            <Cell ss:StyleID="sHeader"><Data ss:Type="String">No. Telp Ibu</Data></Cell>
+          </Row>${rowsXml}
+        </Table>
+      </Worksheet>`;
+      })
+      .join('');
+
+    const workbookXml = `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+  <Styles>
+    <Style ss:ID="sHeader">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+      </Borders>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#000000"/>
+    </Style>
+    <Style ss:ID="sCenter">
+      <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+      </Borders>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Color="#000000"/>
+    </Style>
+    <Style ss:ID="sLeft">
+      <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#000000"/>
+      </Borders>
+      <Font ss:FontName="Calibri" ss:Size="11" ss:Color="#000000"/>
+    </Style>
+  </Styles>${worksheetsXml}
+</Workbook>`;
+
+    const blob = new Blob([workbookXml], { type: 'application/vnd.ms-excel;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'Data_Pembagian_Kelompok_Ujian.xls';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="bg-slate-100 p-4 rounded-xl border border-slate-200 text-center">
+          <div className="text-sm text-slate-500 font-medium">Calon Murid Belum Dapat Penguji</div>
+          <div className="text-2xl font-bold text-slate-800">{unassigned.length}</div>
+        </div>
+        <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 text-center">
+          <div className="text-sm text-blue-600 font-medium">Laki-laki (Belum Dapat Penguji)</div>
+          <div className="text-2xl font-bold text-blue-800">{unassignedLaki}</div>
+        </div>
+        <div className="bg-rose-50 p-4 rounded-xl border border-rose-100 text-center">
+          <div className="text-sm text-rose-600 font-medium">Perempuan (Belum Dapat Penguji)</div>
+          <div className="text-2xl font-bold text-rose-800">{unassignedPerempuan}</div>
+        </div>
+      </div>
+
+      <div className="flex flex-col md:flex-row justify-between md:items-center gap-4 mb-4">
+        <h3 className="text-lg font-bold text-slate-800">Daftar Penguji & Kelompok Ujian</h3>
+        <div className="flex flex-wrap gap-3 w-full md:w-auto">
+          <Button
+            variant="outline"
+            onClick={handleExportExamGroups}
+            disabled={examGroups.length === 0}
+            className="flex-1 md:flex-none text-emerald-700 border-emerald-200 hover:bg-emerald-50"
+          >
+            <Download size={18} className="mr-2" /> Export Excel
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleBagiOtomatis}
+            disabled={unassigned.length === 0 || examGroups.length === 0}
+            className="flex-1 md:flex-none text-blue-700 border-blue-200 hover:bg-blue-50"
+          >
+            <Users size={18} className="mr-2" /> Bagi Otomatis
+          </Button>
+          <Button onClick={() => setIsAdding(true)} className="flex-1 md:flex-none">
+            <Plus size={18} className="mr-2" /> Tambah Penguji
+          </Button>
+        </div>
+      </div>
+
+      {isAdding && (
+        <Card className="p-6 bg-slate-50">
+          <form onSubmit={handleAddGroup} className="space-y-4">
+            <h4 className="font-semibold text-slate-800 border-b pb-2">Tambah Penguji & Kuota Calon Murid</h4>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <Input
+                label="Nama Penguji"
+                value={newGroup.examinerName}
+                onChange={(e: any) => setNewGroup({ ...newGroup, examinerName: e.target.value })}
+                required
+                placeholder="Contoh: Ustadzah Aisyah, S.Pd"
+              />
+              <Input
+                label="Jumlah Calon Murid yang Diuji"
+                type="number"
+                min="1"
+                value={newGroup.capacity}
+                onChange={(e: any) => setNewGroup({ ...newGroup, capacity: Number(e.target.value) })}
+                required
+              />
+              <Input
+                label="Kelompok / Ruang (Opsional)"
+                value={newGroup.groupName}
+                onChange={(e: any) => setNewGroup({ ...newGroup, groupName: e.target.value })}
+                placeholder="Contoh: Kelompok 1 / Ruang A"
+              />
+            </div>
+            <div className="flex justify-end space-x-3 pt-4 border-t border-slate-200">
+              <Button type="button" variant="ghost" onClick={() => setIsAdding(false)}>Batal</Button>
+              <Button type="submit">Simpan Penguji</Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {examGroups.length === 0 ? (
+          <div className="col-span-full p-8 text-center text-slate-500 bg-white border border-slate-200 rounded-xl border-dashed">
+            Belum ada penguji yang ditambahkan. Klik tombol <strong>Tambah Penguji</strong> untuk mulai membagi kelompok ujian.
+          </div>
+        ) : (
+          examGroups.map((group: any) => {
+            const stds = (group.students || [])
+              .map((id: any) => data.find((d: any) => String(d.id) === String(id)))
+              .filter(Boolean);
+            const L = stds.filter((s: any) => s.gender === 'Laki-laki').length;
+            const P = stds.filter((s: any) => s.gender === 'Perempuan').length;
+
+            return (
+              <Card key={group._docId ?? group.id} className="p-5 flex flex-col">
+                <div className="flex justify-between items-start gap-2 mb-3">
+                  <div className="min-w-0">
+                    <h4 className="font-bold text-lg text-slate-800 truncate">{group.examinerName}</h4>
+                    {group.groupName && (
+                      <p className="text-xs font-medium text-blue-600 mt-0.5">{group.groupName}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center space-x-2 flex-shrink-0">
+                    <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md font-medium border border-slate-200">
+                      Kuota: {group.capacity} Murid
+                    </span>
+                    <button
+                      onClick={() => setExamGroups(examGroups.filter((g: any) => String(g.id) !== String(group.id)))}
+                      className="p-1.5 text-rose-600 hover:bg-rose-50 rounded-md transition-colors"
+                      title="Hapus Penguji"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 text-xs mb-4">
+                  <div className="p-2 bg-slate-50 rounded-lg text-center">
+                    <span className="text-slate-500 block">Terisi</span>
+                    <span className="font-bold text-slate-800">{stds.length} / {group.capacity}</span>
+                  </div>
+                  <div className="p-2 bg-blue-50/70 rounded-lg text-center">
+                    <span className="text-blue-600 block">Laki-laki</span>
+                    <span className="font-bold text-blue-800">{L}</span>
+                  </div>
+                  <div className="p-2 bg-rose-50/70 rounded-lg text-center">
+                    <span className="text-rose-600 block">Perempuan</span>
+                    <span className="font-bold text-rose-800">{P}</span>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-100 pt-3">
+                  <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">
+                    Daftar Calon Murid ({stds.length})
+                  </p>
+                  {stds.length > 0 ? (
+                    <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 pr-1 scrollbar-thin">
+                      {stds.map((s: any, idx: number) => {
+                        const ageInfo = calculateDetailedAge(s.birthDate);
+                        return (
+                          <div key={s.id} className="py-2 flex items-center justify-between gap-2 text-xs">
+                            <div className="min-w-0">
+                              <p className="font-semibold text-slate-800 truncate">
+                                {idx + 1}. {s.name} ({s.gender === 'Laki-laki' ? 'L' : 'P'})
+                              </p>
+                              <p className="text-slate-500">
+                                {s.regNumber} {ageInfo ? `• ${ageInfo.label}` : ''}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveStudent(group.id, s.id)}
+                              className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors flex-shrink-0"
+                              title="Keluarkan dari penguji ini"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-400 italic py-2">
+                      Belum ada calon murid. Klik "Bagi Otomatis" untuk membagikan peserta ke penguji ini.
+                    </p>
+                  )}
+                </div>
+              </Card>
+            );
+          })
+        )}
       </div>
     </div>
   );

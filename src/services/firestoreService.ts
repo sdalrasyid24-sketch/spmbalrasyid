@@ -14,6 +14,7 @@ import { handleFirestoreError, OperationType } from '../lib/firestoreErrors.ts';
 
 const REGISTRATIONS_COLLECTION = 'registrations';
 const ROMBELS_COLLECTION = 'rombels';
+const EXAM_GROUPS_COLLECTION = 'exam_groups';
 const SETTINGS_COLLECTION = 'school_settings';
 const SETTINGS_DOC_ID = 'config';
 
@@ -173,6 +174,60 @@ export const firestoreService = {
       await deleteDoc(docRef);
     } catch (error) {
       handleFirestoreError(error, OperationType.DELETE, `${ROMBELS_COLLECTION}/${targetDocId}`);
+    }
+  },
+
+  // --- EXAM GROUPS (KELOMPOK UJIAN) ---
+  subscribeExamGroups(onData: (data: any[]) => void) {
+    const colRef = collection(db, EXAM_GROUPS_COLLECTION);
+    return onSnapshot(
+      colRef,
+      (snapshot) => {
+        const list: any[] = [];
+        snapshot.forEach((d) => {
+          const raw = d.data();
+          list.push({
+            ...raw,
+            id: raw.id !== undefined && raw.id !== null ? raw.id : d.id,
+            _docId: d.id,
+          });
+        });
+        list.sort((a, b) => (Number(a.id) || 0) - (Number(b.id) || 0));
+        onData(list);
+      },
+      (error) => {
+        console.warn('Firestore exam_groups listener error:', error);
+        try {
+          handleFirestoreError(error, OperationType.LIST, EXAM_GROUPS_COLLECTION);
+        } catch {
+          // Handled and logged
+        }
+      }
+    );
+  },
+
+  async saveExamGroup(group: any): Promise<void> {
+    const { _docId, ...cleanGroup } = group;
+    const docId = String(_docId || cleanGroup.id || cleanGroup.examinerName || Date.now());
+    const docRef = doc(db, EXAM_GROUPS_COLLECTION, docId);
+    try {
+      await setDoc(
+        docRef,
+        { ...cleanGroup, id: cleanGroup.id ?? docId, updatedAt: new Date().toISOString() },
+        { merge: true }
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `${EXAM_GROUPS_COLLECTION}/${docId}`);
+    }
+  },
+
+  async deleteExamGroup(docId: string): Promise<void> {
+    const targetDocId = String(docId);
+    const docRef = doc(db, EXAM_GROUPS_COLLECTION, targetDocId);
+    try {
+      await deleteDoc(docRef);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${EXAM_GROUPS_COLLECTION}/${targetDocId}`);
     }
   }
 };
